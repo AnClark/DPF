@@ -259,6 +259,7 @@ function(dpf__build_jack NAME HAS_UI)
       "${APPLE_COREMIDI_FRAMEWORK}")
   elseif(WIN32)
     target_link_libraries("${NAME}-jack" PRIVATE "dsound" "ole32" "winmm")
+    target_link_libraries("${NAME}-jack" PRIVATE "cfgmgr32" "imm32" "setupapi" "version")   # To deal with SDL2 linker error on Msys2
   endif()
 endfunction()
 
