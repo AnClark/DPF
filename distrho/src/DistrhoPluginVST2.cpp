@@ -540,6 +540,9 @@ public:
         case VST_EFFECT_OPCODE_PARAM_GETVALUE:
             if (ptr != nullptr && index < static_cast<int32_t>(fPlugin.getParameterCount()))
             {
+#if DISTRHO_PLUGIN_WANT_PARAMETER_DISPLAY
+                strncpy((char*)ptr, fPlugin.getParameterDisplay(index), 24);
+#else
                 const uint32_t hints = fPlugin.getParameterHints(index);
                 float value = fPlugin.getParameterValue(index);
 
@@ -572,6 +575,7 @@ public:
                     snprintf_f32((char*)ptr, value, 24);
 
                 return 1;
+#endif
             }
             break;
 
