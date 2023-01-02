@@ -1201,6 +1201,16 @@ protected:
     */
     virtual void setParameterValue(uint32_t index, float value);
 
+#if DISTRHO_PLUGIN_WANT_PARAMETER_DISPLAY
+   /**
+      Get the current value display of a parameter. This will be shown in generic UI.@n
+      Useful if a plugin has its own method to render user-friendly parameter values.@n
+      The host may call this function from any context, including realtime processing.@n
+      Must be implemented by your plugin class only if DISTRHO_PLUGIN_WANT_PARAMETER_DISPLAY is enabled.
+    */
+    virtual String getParameterDisplay(uint32_t index) const;
+#endif
+
 #if DISTRHO_PLUGIN_WANT_PROGRAMS
    /**
       Load a program.@n

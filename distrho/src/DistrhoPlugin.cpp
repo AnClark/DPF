@@ -229,6 +229,10 @@ void Plugin::initState(const uint32_t index, State& state)
 float Plugin::getParameterValue(uint32_t) const { return 0.0f; }
 void Plugin::setParameterValue(uint32_t, float) {}
 
+#if DISTRHO_PLUGIN_WANT_PARAMETER_DISPLAY
+String Plugin::getParameterDisplay(uint32_t) const { return String(); }
+#endif
+
 #if DISTRHO_PLUGIN_WANT_PROGRAMS
 void Plugin::loadProgram(uint32_t) {}
 #endif

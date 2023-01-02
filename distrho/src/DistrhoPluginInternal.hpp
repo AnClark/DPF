@@ -756,6 +756,16 @@ public:
         fPlugin->setParameterValue(index, value);
     }
 
+#if DISTRHO_PLUGIN_WANT_PARAMETER_DISPLAY
+    String getParameterDisplay(uint32_t index) const
+    {
+        DISTRHO_SAFE_ASSERT_RETURN(fPlugin != nullptr, String(""));
+        DISTRHO_SAFE_ASSERT_RETURN(fData != nullptr && index < fData->parameterCount, String(""));
+
+        return fPlugin->getParameterDisplay(index);
+    }
+#endif
+
     uint32_t getPortGroupCount() const noexcept
     {
         DISTRHO_SAFE_ASSERT_RETURN(fData != nullptr, 0);
