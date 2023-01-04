@@ -235,6 +235,13 @@ public:
     // -------------------------------------------------------------------
     // functions called from the plugin side, may block
 
+   #if DISTRHO_PLUGIN_WANT_PROGRAMS
+    void setProgramFromPlugin(const uint32_t index)
+    {
+        fUI.programLoaded(index);
+    }
+   #endif
+
    #if DISTRHO_PLUGIN_WANT_STATE
     void setStateFromPlugin(const char* const key, const char* const value)
     {
@@ -498,6 +505,15 @@ public:
 
             fPlugin.loadProgram(value);
             fProgramIndex = value;
+# if DISTRHO_PLUGIN_HAS_UI
+            if (fVstUI != nullptr)
+            {
+                for (uint32_t i=0, count=fPlugin.getParameterCount(); i < count; ++i)
+                    setParameterValueFromPlugin(i, fPlugin.getParameterValue(i));
+
+                fVstUI->setProgramFromPlugin(value);
+            }
+# endif
             return 1;
             break;
 #endif
