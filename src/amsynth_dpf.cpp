@@ -7,6 +7,7 @@
 #include <cassert>
 
 #include "EmbedPresetController.h"
+#include "amsynth_dpf_banks.h"
 
 START_NAMESPACE_DISTRHO
 
@@ -16,7 +17,8 @@ START_NAMESPACE_DISTRHO
     Populate how many factory banks and programs should the plugin load.
 */
 constexpr size_t kPresetsPerBank = sizeof(BankInfo::presets) / sizeof(BankInfo::presets[0]); // Preset count per bank
-static const int numPrograms = EmbedPresetController::getPresetBanks().size() * kPresetsPerBank; // Total program count
+// static const int numPrograms = EmbedPresetController::getPresetBanks().size() * kPresetsPerBank; // Total program count
+static const int numPrograms = 128 + 1;
 
 /**
     Plugin class constructor.@n
@@ -28,6 +30,9 @@ AmsynthPlugin::AmsynthPlugin()
     // Must explicitly set a default sample rate first,
     // because derived Synthesizer class cannot obtain default value.
     fSynthesizer->setSampleRate(44100);
+
+    // Set default bank ID
+    s_bank_state.setCurrentBank(0);
 }
 
 // -----------------------------------------------------------------------
@@ -94,7 +99,7 @@ void AmsynthPlugin::initProgramName(uint32_t index, String& programName)
         programName = "-- Init / User --";
         return;
     }
-
+#if 0
     // Check if there were preset files or not
     // If you don't check, host will crash if no preset was installed
     if (EmbedPresetController::getPresetBanks().size()) {
@@ -116,6 +121,27 @@ void AmsynthPlugin::initProgramName(uint32_t index, String& programName)
         // Do not continue accessing if no preset was found
         return;
     }
+#else
+    if (EmbedPresetController::getPresetBanks().size()) {
+        // As #0 is "Initial", other factory programs should be put into the next hole.
+        // "index" is host's display index, and "actual_index" is the corresponding bank's index.
+        int actual_index = index - 1;
+
+        // Obtain bank and preset
+        auto& bank = EmbedPresetController::getPresetBanks().at(s_bank_state.getCurrentBank());
+        auto& preset = bank.presets[actual_index % kPresetsPerBank];
+
+        // Set current obtained preset name, then show the name on host
+        programName = preset.getName().c_str();
+
+        // d_stderr("Preset index: %d, bank: %s, name: %s", index, bank.name.c_str(), preset.getName().c_str());
+
+        return;
+    } else {
+        // Do not continue accessing if no preset was found
+        return;
+    }
+#endif
 }
 
 // ----------------------------------------------------------------------------------------------------------------
@@ -163,7 +189,7 @@ void AmsynthPlugin::loadProgram(uint32_t index)
     // Obtain bank and preset
     // The corresponding factory program index is just by one item before host's index.
     int actual_index = index >= 1 ? index - 1 : 0; // In case of possible error
-    auto& bank = EmbedPresetController::getPresetBanks().at(actual_index / kPresetsPerBank);
+    auto& bank = EmbedPresetController::getPresetBanks().at(s_bank_state.getCurrentBank());
     auto& preset = bank.presets[actual_index % kPresetsPerBank];
 
     // Apply preset
