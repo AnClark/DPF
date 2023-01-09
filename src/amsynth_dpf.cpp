@@ -31,8 +31,9 @@ AmsynthPlugin::AmsynthPlugin()
     // because derived Synthesizer class cannot obtain default value.
     fSynthesizer->setSampleRate(44100);
 
-    // Set default bank ID
+    // Set default bank and program ID
     s_bank_state.setCurrentBank(0);
+    s_bank_state.setCurrentProgram(0);
 }
 
 // -----------------------------------------------------------------------
