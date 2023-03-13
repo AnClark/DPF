@@ -267,6 +267,11 @@ function(dpf__build_jack NAME HAS_UI)
   elseif(WIN32)
     target_link_libraries("${NAME}-jack" PRIVATE "dsound" "ole32" "winmm")
   endif()
+
+  # SDL2 dependencies on Windows
+  if(WIN32)
+    target_link_libraries("${NAME}-jack" PRIVATE "cfgmgr32" "imm32" "setupapi" "version")
+  endif()
 endfunction()
 
 # dpf__build_ladspa
