@@ -1,0 +1,22 @@
+# data file for the Fltk User Interface Designer (fluid)
+version 1.0308
+header_name {.h}
+code_name {.cxx}
+class FltkTestUi {open
+} {
+  Function {make_window()} {open
+  } {
+    Fl_Window {} {
+      label {FLTK Test UI with DPF} open selected
+      xywh {441 248 470 280} type Double visible
+    } {
+      Fl_Clock {} {
+        xywh {25 25 230 220}
+      }
+      Fl_Text_Display {} {
+        label {FLTK Example UI on DPF}
+        xywh {335 65 50 40}
+      }
+    }
+  }
+}
