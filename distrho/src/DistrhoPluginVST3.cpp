@@ -68,6 +68,9 @@ static constexpr const writeMidiFunc writeMidiCallback = nullptr;
 #if ! DISTRHO_PLUGIN_WANT_PARAMETER_VALUE_CHANGE_REQUEST
 static constexpr const requestParameterValueChangeFunc requestParameterValueChangeCallback = nullptr;
 #endif
+#if ! DISTRHO_PLUGIN_WANT_STATE
+static constexpr const updateStateValueFunc updateStateValueCallback = nullptr;
+#endif
 
 typedef std::map<const String, String> StringMap;
 
@@ -583,7 +586,7 @@ class PluginVst3
 
 public:
     PluginVst3(v3_host_application** const host, const bool isComponent)
-        : fPlugin(this, writeMidiCallback, requestParameterValueChangeCallback, nullptr),
+        : fPlugin(this, writeMidiCallback, requestParameterValueChangeCallback, updateStateValueCallback),
           fComponentHandler(nullptr),
         #if DISTRHO_PLUGIN_HAS_UI
          #if DPF_VST3_USES_SEPARATE_CONTROLLER
@@ -656,10 +659,24 @@ public:
         }
 
        #if DISTRHO_PLUGIN_WANT_STATE
-        for (uint32_t i=0, count=fPlugin.getStateCount(); i<count; ++i)
+        if (const uint32_t count = fPlugin.getStateCount())
         {
-            const String& dkey(fPlugin.getStateKey(i));
-            fStateMap[dkey] = fPlugin.getStateDefaultValue(i);
+           #if DISTRHO_PLUGIN_HAS_UI
+            fStateChangesForUI = new bool[count];
+            std::memset(fStateChangesForUI, 0, sizeof(bool)*count);
+           #endif
+
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                const String& dkey(fPlugin.getStateKey(i));
+                fStateMap[dkey] = fPlugin.getStateDefaultValue(i);
+            }
+        }
+        else
+        {
+           #if DISTRHO_PLUGIN_HAS_UI
+            fStateChangesForUI = nullptr;
+           #endif
         }
        #endif
 
@@ -694,6 +711,14 @@ public:
         {
             delete[] fParameterValueChangesForUI;
             fParameterValueChangesForUI = nullptr;
+        }
+       #endif
+
+       #if DISTRHO_PLUGIN_HAS_UI && DISTRHO_PLUGIN_WANT_STATE
+        if (fStateChangesForUI != nullptr)
+        {
+            delete[] fStateChangesForUI;
+            fStateChangesForUI = nullptr;
         }
        #endif
     }
@@ -2156,6 +2181,19 @@ public:
        #if DISTRHO_PLUGIN_WANT_STATE
         if (std::strcmp(msgid, "state-set") == 0)
             return notify_state(attrs);
+
+        if (std::strcmp(msgid, "plugin-state-set") == 0)
+        {
+            // state change pushed by the plugin side of the component, apply it locally so our
+            // state cache stays in sync, then pass it along to the UI
+            String key, value;
+            const v3_result res = notify_state(attrs, &key, &value);
+
+            if (res == V3_OK && fConnectedToUI)
+                sendStateSetToUI(key.buffer(), value.buffer());
+
+            return res;
+        }
        #endif
 
         d_stderr("comp2ctrl_notify received unknown msg '%s'", msgid);
@@ -2267,6 +2305,22 @@ public:
                                      fCachedParameterValues[kVst3InternalParameterBaseCount + i]);
             }
 
+           #if DISTRHO_PLUGIN_WANT_STATE
+            for (uint32_t i = 0, count = fPlugin.getStateCount(); i < count; ++i)
+            {
+                if (! fStateChangesForUI[i])
+                    continue;
+
+                fStateChangesForUI[i] = false;
+
+                const String& key(fPlugin.getStateKey(i));
+                const StringMap::const_iterator cit = fStateMap.find(key);
+
+                if (cit != fStateMap.end())
+                    sendStateSetToUI(key.buffer(), cit->second.buffer());
+            }
+           #endif
+
             sendReadyToUI();
             return V3_OK;
         }
@@ -2274,6 +2328,12 @@ public:
         if (std::strcmp(msgid, "close") == 0)
         {
             fConnectedToUI = false;
+
+           #if DISTRHO_PLUGIN_WANT_STATE
+            for (uint32_t i = 0, count = fPlugin.getStateCount(); i < count; ++i)
+                fStateChangesForUI[i] = false;
+           #endif
+
             return V3_OK;
         }
 
@@ -2365,7 +2425,7 @@ public:
     }
 
    #if DISTRHO_PLUGIN_WANT_STATE
-    v3_result notify_state(v3_attribute_list** const attrs)
+    v3_result notify_state(v3_attribute_list** const attrs, String* const keyOut = nullptr, String* const valueOut = nullptr)
     {
         int64_t keyLength = -1;
         int64_t valueLength = -1;
@@ -2414,6 +2474,11 @@ public:
             const String dkey(key);
             fStateMap[dkey] = value;
         }
+
+        if (keyOut != nullptr)
+            *keyOut = key;
+        if (valueOut != nullptr)
+            *valueOut = value;
 
         std::free(key16);
         std::free(value16);
@@ -2492,6 +2557,10 @@ private:
    #endif
    #if DISTRHO_PLUGIN_WANT_STATE
     StringMap fStateMap;
+
+       #if DISTRHO_PLUGIN_HAS_UI
+    bool* fStateChangesForUI;
+       #endif
    #endif
    #if DISTRHO_PLUGIN_WANT_TIMEPOS
     TimePosition fTimePosition;
@@ -3029,6 +3098,27 @@ private:
         v3_cpp_obj_unref(message);
     }
 
+   #if DPF_VST3_USES_SEPARATE_CONTROLLER
+    // component-side variant of sendStateSetToUI, messages the controller about a plugin-side state change
+    void sendStateSetToCtrl(const char* const key, const char* const value) const
+    {
+        v3_message** const message = createMessage("plugin-state-set");
+        DISTRHO_SAFE_ASSERT_RETURN(message != nullptr,);
+
+        v3_attribute_list** const attrlist = v3_cpp_obj(message)->get_attributes(message);
+        DISTRHO_SAFE_ASSERT_RETURN(attrlist != nullptr,);
+
+        v3_cpp_obj(attrlist)->set_int(attrlist, "__dpf_msg_target__", 2);
+        v3_cpp_obj(attrlist)->set_int(attrlist, "key:length", std::strlen(key));
+        v3_cpp_obj(attrlist)->set_int(attrlist, "value:length", std::strlen(value));
+        v3_cpp_obj(attrlist)->set_string(attrlist, "key", ScopedUTF16String(key));
+        v3_cpp_obj(attrlist)->set_string(attrlist, "value", ScopedUTF16String(value));
+        v3_cpp_obj(fConnectionFromCompToCtrl)->notify(fConnectionFromCompToCtrl, message);
+
+        v3_cpp_obj_unref(message);
+    }
+   #endif
+
     void sendReadyToUI() const
     {
         v3_message** const message = createMessage("ready");
@@ -3057,6 +3147,52 @@ private:
     static bool requestParameterValueChangeCallback(void* const ptr, const uint32_t index, const float value)
     {
         return static_cast<PluginVst3*>(ptr)->requestParameterValueChange(index, value);
+    }
+   #endif
+
+   #if DISTRHO_PLUGIN_WANT_STATE
+    bool updateState(const char* const key, const char* const value)
+    {
+        fPlugin.setState(key, value);
+
+        // key must already exist
+        for (uint32_t i = 0, count = fPlugin.getStateCount(); i < count; ++i)
+        {
+            if (fPlugin.getStateKey(i) != key)
+                continue;
+
+            const String dkey(key);
+            fStateMap[dkey] = value;
+
+           #if DISTRHO_PLUGIN_HAS_UI
+            if ((fPlugin.getStateHints(i) & kStateIsOnlyForDSP) == 0x0)
+            {
+               #if DPF_VST3_USES_SEPARATE_CONTROLLER
+                // separate controller setup, the UI is connected to the controller object,
+                // so message it about the change instead of reaching for the UI directly
+                if (fIsComponent)
+                {
+                    if (fConnectionFromCompToCtrl != nullptr)
+                        sendStateSetToCtrl(key, value);
+                    return true;
+                }
+               #endif
+
+                if (fConnectedToUI)
+                    fStateChangesForUI[i] = true;
+            }
+           #endif
+
+            return true;
+        }
+
+        d_stderr("Failed to find plugin state with key \"%s\"", key);
+        return false;
+    }
+
+    static bool updateStateValueCallback(void* const ptr, const char* const key, const char* const value)
+    {
+        return static_cast<PluginVst3*>(ptr)->updateState(key, value);
     }
    #endif
 

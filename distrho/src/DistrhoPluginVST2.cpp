@@ -99,6 +99,9 @@ static constexpr const writeMidiFunc writeMidiCallback = nullptr;
 #if ! DISTRHO_PLUGIN_WANT_PARAMETER_VALUE_CHANGE_REQUEST
 static constexpr const requestParameterValueChangeFunc requestParameterValueChangeCallback = nullptr;
 #endif
+#if ! DISTRHO_PLUGIN_WANT_STATE
+static constexpr const updateStateValueFunc updateStateValueCallback = nullptr;
+#endif
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -386,7 +389,7 @@ class PluginVst : public ParameterAndNotesHelper
 {
 public:
     PluginVst(const vst_host_callback audioMaster, vst_effect* const effect)
-        : fPlugin(this, writeMidiCallback, requestParameterValueChangeCallback, nullptr),
+        : fPlugin(this, writeMidiCallback, requestParameterValueChangeCallback, updateStateValueCallback),
           fAudioMaster(audioMaster),
           fEffect(effect)
     {
@@ -440,10 +443,24 @@ public:
        #if DISTRHO_PLUGIN_WANT_STATE
         fStateChunk = nullptr;
 
-        for (uint32_t i=0, count=fPlugin.getStateCount(); i<count; ++i)
+        if (const uint32_t count = fPlugin.getStateCount())
         {
-            const String& dkey(fPlugin.getStateKey(i));
-            fStateMap[dkey] = fPlugin.getStateDefaultValue(i);
+           #if DISTRHO_PLUGIN_HAS_UI
+            fNeededUiSends = new bool[count];
+            std::memset(fNeededUiSends, 0, sizeof(bool) * count);
+           #endif
+
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                const String& dkey(fPlugin.getStateKey(i));
+                fStateMap[dkey] = fPlugin.getStateDefaultValue(i);
+            }
+        }
+        else
+        {
+           #if DISTRHO_PLUGIN_HAS_UI
+            fNeededUiSends = nullptr;
+           #endif
         }
        #endif
     }
@@ -456,6 +473,14 @@ public:
             delete[] fStateChunk;
             fStateChunk = nullptr;
         }
+
+       #if DISTRHO_PLUGIN_HAS_UI
+        if (fNeededUiSends != nullptr)
+        {
+            delete[] fNeededUiSends;
+            fNeededUiSends = nullptr;
+        }
+       #endif
 
         fStateMap.clear();
        #endif
@@ -661,13 +686,38 @@ public:
             {
                 delete fVstUI;
                 fVstUI = nullptr;
+
+               #if DISTRHO_PLUGIN_WANT_STATE
+                // drop pending UI sends, the next window creation does a full state sync anyway
+                for (uint32_t i = 0, count = fPlugin.getStateCount(); i < count; ++i)
+                    fNeededUiSends[i] = false;
+               #endif
+
                 return 1;
             }
             break;
 
         case VST_EFFECT_OPCODE_13: // window idle
             if (fVstUI != nullptr)
+            {
+               #if DISTRHO_PLUGIN_WANT_STATE
+                // send state changes coming from the plugin side to the UI
+                for (uint32_t i = 0, count = fPlugin.getStateCount(); i < count; ++i)
+                {
+                    if (! fNeededUiSends[i])
+                        continue;
+                    fNeededUiSends[i] = false;
+
+                    const String& key(fPlugin.getStateKey(i));
+                    const StringMap::const_iterator cit = fStateMap.find(key);
+
+                    if (cit != fStateMap.end())
+                        fVstUI->setStateFromPlugin(cit->first, cit->second);
+                }
+               #endif
+
                 fVstUI->idle();
+            }
             break;
 
         case VST_EFFECT_OPCODE_3B: // key down
@@ -1141,6 +1191,9 @@ private:
    #if DISTRHO_PLUGIN_WANT_STATE
     char*     fStateChunk;
     StringMap fStateMap;
+   #if DISTRHO_PLUGIN_HAS_UI
+    bool*     fNeededUiSends;
+   #endif
    #endif
 
     // ----------------------------------------------------------------------------------------------------------------
@@ -1281,6 +1334,39 @@ private:
             const String dkey(key);
             fStateMap[dkey] = value;
         }
+    }
+
+    // ------------------------------------------------------------------------------------------------------------
+    // functions called from the plugin side, may block
+
+    bool updateState(const char* const key, const char* const value)
+    {
+        fPlugin.setState(key, value);
+
+        // key must already exist
+        for (uint32_t i = 0, count = fPlugin.getStateCount(); i < count; ++i)
+        {
+            if (fPlugin.getStateKey(i) != key)
+                continue;
+
+            const String dkey(key);
+            fStateMap[dkey] = value;
+
+           #if DISTRHO_PLUGIN_HAS_UI
+            if (fVstUI != nullptr && (fPlugin.getStateHints(i) & kStateIsOnlyForDSP) == 0x0)
+                fNeededUiSends[i] = true;
+           #endif
+
+            return true;
+        }
+
+        d_stderr("Failed to find plugin state with key \"%s\"", key);
+        return false;
+    }
+
+    static bool updateStateValueCallback(void* ptr, const char* key, const char* value)
+    {
+        return static_cast<PluginVst*>(ptr)->updateState(key, value);
     }
   #endif
 };
